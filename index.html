@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Historical DN Data</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .bar { margin-bottom: 15px; }
+    .bar input, .bar button { padding: 6px; margin-right: 8px; }
+    .table-box { overflow-x: auto; }
+    table { border-collapse: collapse; font-size: 13px; }
+    th, td { border: 1px solid #ccc; padding: 6px 10px; white-space: nowrap; }
+    th { background: #2563eb; color: white; position: sticky; top: 0; }
+    tr:nth-child(even) { background: #f5f7fa; }
+    #filters { display: none; }
+  </style>
+</head>
+<body>
+  <h2>Historical DN Data</h2>
+
+  <!-- Login -->
+  <div class="bar" id="login">
+    <input type="email" id="email" placeholder="Metabase email">
+    <input type="password" id="password" placeholder="Password">
+    <button onclick="loadData()">Load data</button>
+  </div>
+
+  <!-- Filters -->
+  <div class="bar" id="filters">
+    From: <input type="date" id="from">
+    To: <input type="date" id="to">
+    <input type="text" id="search" placeholder="Search...">
+    <button onclick="showTable()">Apply</button>
+  </div>
+
+  <p id="count"></p>
+  <div class="table-box"><table id="table"></table></div>
+
+  <script>
+    const MB = 'https://metabase-lighthouse.solarsquare.in';
+    const CARD_ID = 5728;
+    let rows = [];
+
+    async function loadData() {
+      const msg = document.getElementById('count');
+      msg.innerText = 'Loading...';
+      try {
+        // 1. Log in to Metabase
+        const login = await fetch(MB + '/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: document.getElementById('email').value,
+            password: document.getElementById('password').value
+          })
+        });
+        if (!login.ok) throw new Error('Login failed, check email/password');
+        const session = (await login.json()).id;
+
+        // 2. Run question 5728 (json export returns all rows, not just 2000)
+        const res = await fetch(MB + '/api/card/' + CARD_ID + '/query/json', {
+          method: 'POST',
+          headers: { 'X-Metabase-Session': session, 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'parameters=[]'
+        });
+        if (!res.ok) throw new Error('Query failed (HTTP ' + res.status + ')');
+        rows = await res.json();
+
+        document.getElementById('login').style.display = 'none';
+        document.getElementById('filters').style.display = 'block';
+        showTable();
+      } catch (e) {
+        msg.innerText = 'Error: ' + e.message + ' (if it says "Failed to fetch", it is a CORS block, see notes)';
+      }
+    }
+
+    function toDate(v) {
+      const d = new Date(v);
+      return isNaN(d) ? '' : d.toISOString().slice(0, 10);
+    }
+
+    function showTable() {
+      if (!rows.length) { document.getElementById('count').innerText = 'No data'; return; }
+
+      const from = document.getElementById('from').value;
+      const to = document.getElementById('to').value;
+      const search = document.getElementById('search').value.toLowerCase();
+
+      const filtered = rows.filter(r => {
+        const d = toDate(r.posting_date);
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+        if (search && !Object.values(r).join(' ').toLowerCase().includes(search)) return false;
+        return true;
+      });
+
+      const cols = Object.keys(rows[0]);
+      let html = '<tr>' + cols.map(c => '<th>' + c + '</th>').join('') + '</tr>';
+      filtered.slice(0, 1000).forEach(r => {
+        html += '<tr>' + cols.map(c =>
+          '<td>' + (c === 'posting_date' ? toDate(r[c]) : (r[c] ?? '')) + '</td>'
+        ).join('') + '</tr>';
+      });
+
+      document.getElementById('table').innerHTML = html;
+      document.getElementById('count').innerText = filtered.length + ' rows' +
+        (filtered.length > 1000 ? ' (showing first 1000, narrow the dates to see the rest)' : '');
+    }
+  </script>
+</body>
+</html>
